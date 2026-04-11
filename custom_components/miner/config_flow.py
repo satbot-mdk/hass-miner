@@ -1,28 +1,12 @@
 """Config flow for Miner."""
 import logging
+import sys
 from importlib.metadata import version
-
-from .const import PYASIC_VERSION
-
-try:
-    import pyasic
-
-    if not version("pyasic") == PYASIC_VERSION:
-        raise ImportError
-except ImportError:
-    from .patch import install_package
-
-    install_package(f"pyasic=={PYASIC_VERSION}")
-    import pyasic
-
-from pyasic import MinerNetwork
-from pyasic.device.makes import MinerMake
 
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import network
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.config_entry_flow import register_discovery_flow
 from homeassistant.helpers.selector import TextSelector
 from homeassistant.helpers.selector import TextSelectorConfig
 from homeassistant.helpers.selector import TextSelectorType
@@ -37,12 +21,55 @@ from .const import CONF_TITLE
 from .const import CONF_WEB_PASSWORD
 from .const import CONF_WEB_USERNAME
 from .const import DOMAIN
+from .const import PYASIC_VERSION
 
 _LOGGER = logging.getLogger(__name__)
+
+# Lazy import - will be populated when needed
+pyasic = None
+MinerNetwork = None
+MinerMake = None
+
+
+def _ensure_pyasic():
+    """Ensure pyasic is installed and imported."""
+    global pyasic, MinerNetwork, MinerMake
+    if pyasic is not None:
+        return
+
+    def try_import():
+        try:
+            import pyasic as _pyasic
+            if not hasattr(_pyasic, 'get_miner'):
+                raise ImportError("pyasic module incomplete")
+            if version("pyasic") != PYASIC_VERSION:
+                raise ImportError("Version mismatch")
+            return _pyasic
+        except Exception:
+            return None
+
+    _pyasic = try_import()
+    if _pyasic is None:
+        # Clear any cached broken imports before reinstalling
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith('pyasic'):
+                del sys.modules[mod_name]
+
+        from .patch import install_package
+        install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True)
+
+        import pyasic as _pyasic
+
+    pyasic = _pyasic
+    from pyasic import MinerNetwork as _MinerNetwork
+    MinerNetwork = _MinerNetwork
+    from pyasic.device.makes import MinerMake as _MinerMake
+    MinerMake = _MinerMake
 
 
 async def _async_has_devices(hass: HomeAssistant) -> bool:
     """Return if there are devices that can be discovered."""
+    await hass.async_add_executor_job(_ensure_pyasic)
     adapters = await network.async_get_adapters(hass)
 
     for adapter in adapters:
@@ -56,13 +83,12 @@ async def _async_has_devices(hass: HomeAssistant) -> bool:
     return False
 
 
-register_discovery_flow(DOMAIN, "miner", _async_has_devices)
-
-
 async def validate_ip_input(
+    hass: HomeAssistant,
     data: dict[str, str]
-) -> tuple[dict[str, str], pyasic.AnyMiner | None]:
+):
     """Validate the user input allows us to connect."""
+    await hass.async_add_executor_job(_ensure_pyasic)
     miner_ip = data.get(CONF_IP)
 
     miner = await pyasic.get_miner(miner_ip)
@@ -102,7 +128,7 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not user_input:
             return self.async_show_form(step_id="user", data_schema=schema)
 
-        errors, miner = await validate_ip_input(user_input)
+        errors, miner = await validate_ip_input(self.hass, user_input)
 
         if errors:
             return self.async_show_form(
@@ -226,3 +252,14 @@ class MinerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._data.update(user_input)
 
         return self.async_create_entry(title=self._data[CONF_TITLE], data=self._data)
+
+    async def async_step_discovery(self, discovery_info):
+        """Handle discovery."""
+        if self._async_current_entries():
+            return self.async_abort(reason="already_configured")
+
+        has_devices = await _async_has_devices(self.hass)
+        if not has_devices:
+            return self.async_abort(reason="no_devices_found")
+
+        return await self.async_step_user()
