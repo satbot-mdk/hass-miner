@@ -21,6 +21,7 @@ from .const import CONF_TITLE
 from .const import CONF_WEB_PASSWORD
 from .const import CONF_WEB_USERNAME
 from .const import DOMAIN
+from .const import PYASIC_GIT_URL
 from .const import PYASIC_VERSION
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,8 +43,10 @@ def _ensure_pyasic():
             import pyasic as _pyasic
             if not hasattr(_pyasic, 'get_miner'):
                 raise ImportError("pyasic module incomplete")
-            if version("pyasic") != PYASIC_VERSION:
-                raise ImportError("Version mismatch")
+            # Check for S21 Pro+ support (our fork)
+            from pyasic.device.models import MinerModel
+            if not hasattr(MinerModel.ANTMINER, 'S21ProPlus'):
+                raise ImportError("Missing S21 Pro+ support")
             return _pyasic
         except Exception:
             return None
@@ -56,7 +59,7 @@ def _ensure_pyasic():
                 del sys.modules[mod_name]
 
         from .patch import install_package
-        install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True)
+        install_package(PYASIC_GIT_URL, force_reinstall=True)
 
         import pyasic as _pyasic
 
