@@ -21,13 +21,20 @@ from .coordinator import MinerCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+from homeassistant.const import PERCENTAGE
+
 NUMBER_DESCRIPTION_KEY_MAP: dict[str, NumberEntityDescription] = {
     "power_limit": NumberEntityDescription(
         key="Power Limit",
         native_unit_of_measurement=UnitOfPower.WATT,
         device_class=NumberDeviceClass.POWER,
         entity_category=EntityCategory.CONFIG,
-    )
+    ),
+    "hashrate_percent": NumberEntityDescription(
+        key="Hashrate Percent",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.CONFIG,
+    ),
 }
 
 
@@ -40,15 +47,23 @@ async def async_setup_entry(
     coordinator: MinerCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     await coordinator.async_config_entry_first_refresh()
+    entities = []
     if coordinator.miner.supports_autotuning:
-        async_add_entities(
-            [
-                MinerPowerLimitNumber(
-                    coordinator=coordinator,
-                    entity_description=NUMBER_DESCRIPTION_KEY_MAP["power_limit"],
-                )
-            ]
+        entities.append(
+            MinerPowerLimitNumber(
+                coordinator=coordinator,
+                entity_description=NUMBER_DESCRIPTION_KEY_MAP["power_limit"],
+            )
         )
+    if coordinator.miner.supports_hashrate_percent:
+        entities.append(
+            MinerHashratePercentNumber(
+                coordinator=coordinator,
+                entity_description=NUMBER_DESCRIPTION_KEY_MAP["hashrate_percent"],
+            )
+        )
+    if entities:
+        async_add_entities(entities)
 
 
 class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
@@ -138,6 +153,99 @@ class MinerPowerLimitNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
                 "power_limit"
             ]
 
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available or not."""
+        return self.coordinator.available
+
+
+class MinerHashratePercentNumber(CoordinatorEntity[MinerCoordinator], NumberEntity):
+    """Defines a Miner Number to set the Hashrate Percentage of the Miner."""
+
+    def __init__(
+        self, coordinator: MinerCoordinator, entity_description: NumberEntityDescription
+    ):
+        """Initialize the Hashrate Percent entity."""
+        super().__init__(coordinator=coordinator)
+        self._attr_native_value = self.coordinator.data.get("hashrate_percent", 100)
+        self.entity_description = entity_description
+
+    @property
+    def name(self) -> str | None:
+        """Return name of the entity."""
+        return f"{self.coordinator.config_entry.title} Hashrate Percent"
+
+    @property
+    def device_info(self) -> entity.DeviceInfo:
+        """Return device info."""
+        return entity.DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.data["mac"])},
+            connections={
+                ("ip", self.coordinator.data["ip"]),
+                (device_registry.CONNECTION_NETWORK_MAC, self.coordinator.data["mac"]),
+            },
+            configuration_url=f"http://{self.coordinator.data['ip']}",
+            manufacturer=self.coordinator.data["make"],
+            model=self.coordinator.data["model"],
+            sw_version=self.coordinator.data["fw_ver"],
+            name=f"{self.coordinator.config_entry.title}",
+        )
+
+    @property
+    def unique_id(self) -> str | None:
+        """Return device UUID."""
+        return f"{self.coordinator.data['mac']}-hashrate_percent"
+
+    @property
+    def native_min_value(self) -> float | None:
+        """Return minimum value."""
+        return 1
+
+    @property
+    def native_max_value(self) -> float | None:
+        """Return maximum value."""
+        return 100
+
+    @property
+    def native_step(self) -> float | None:
+        """Return increment step."""
+        return 5
+
+    @property
+    def native_unit_of_measurement(self):
+        """Return unit of measurement."""
+        return "%"
+
+    async def async_set_native_value(self, value):
+        """Update the hashrate percentage."""
+        import pyasic
+
+        miner = self.coordinator.miner
+
+        _LOGGER.debug(
+            f"{self.coordinator.config_entry.title}: setting hashrate percent to {value}."
+        )
+
+        if not miner.supports_hashrate_percent:
+            raise TypeError(
+                f"{self.coordinator.config_entry.title}: Hashrate percent not supported."
+            )
+
+        result = await miner.set_hashrate_percent(int(value))
+
+        if not result:
+            raise pyasic.APIError("Failed to set hashrate percent.")
+
+        self._attr_native_value = value
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        pct = self.coordinator.data.get("hashrate_percent")
+        if pct is not None:
+            self._attr_native_value = pct
         super()._handle_coordinator_update()
 
     @property

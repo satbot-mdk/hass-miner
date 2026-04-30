@@ -234,6 +234,7 @@ class MinerCoordinator(DataUpdateCoordinator):
                 idx: {"fan_speed": fan.speed} for idx, fan in enumerate(miner_data.fans)
             },
             "config": miner_data.config,
+            "hashrate_percent": miner_data.config.hashrate_percent if miner_data.config else None,
             "power_limit_range": {
                 "min": self.config_entry.data.get(CONF_MIN_POWER, 15),
                 "max": self.config_entry.data.get(CONF_MAX_POWER, 10000),
