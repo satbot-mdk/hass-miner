@@ -10,6 +10,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import CONF_IP
 from .const import DOMAIN
+from .const import PYASIC_GIT_URL
 from .const import PYASIC_VERSION
 
 PLATFORMS: list[Platform] = [
@@ -25,12 +26,13 @@ def _ensure_pyasic():
 
     def try_import():
         try:
-            from importlib.metadata import version
             import pyasic
             if not hasattr(pyasic, 'get_miner'):
                 raise ImportError("pyasic module incomplete")
-            if version("pyasic") != PYASIC_VERSION:
-                raise ImportError("Version mismatch")
+            # Check for S21 Pro+ support (our fork)
+            from pyasic.device.models import MinerModel
+            if not hasattr(MinerModel.ANTMINER, 'S21ProPlus'):
+                raise ImportError("Missing S21 Pro+ support")
             return pyasic
         except Exception:
             return None
@@ -39,9 +41,9 @@ def _ensure_pyasic():
     if pyasic:
         return pyasic
 
-    # Need to install/reinstall
+    # Need to install/reinstall from our fork (S21 Pro+ support)
     from .patch import install_package
-    install_package(f"pyasic=={PYASIC_VERSION}", force_reinstall=True)
+    install_package(PYASIC_GIT_URL, force_reinstall=True)
 
     # Clear any cached broken imports
     for mod_name in list(sys.modules.keys()):

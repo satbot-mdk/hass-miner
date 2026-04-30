@@ -21,3 +21,4 @@ JOULES_PER_TERA_HASH = "J/TH"
 
 
 PYASIC_VERSION = "0.78.8"
+PYASIC_GIT_URL = "git+https://github.com/satbot-mdk/pyasic.git@master"
