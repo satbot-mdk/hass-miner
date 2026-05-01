@@ -29,10 +29,13 @@ def _ensure_pyasic():
             import pyasic
             if not hasattr(pyasic, 'get_miner'):
                 raise ImportError("pyasic module incomplete")
-            # Check for S21 Pro+ support (our fork)
+            # Check for S21 Pro+ support + wattage + hashrate_percent (our fork)
             from pyasic.device.models import MinerModel
             if not hasattr(MinerModel.ANTMINER, 'S21ProPlus'):
                 raise ImportError("Missing S21 Pro+ support")
+            from pyasic.config import MinerConfig
+            if not hasattr(MinerConfig.model_fields, 'hashrate_percent') and 'hashrate_percent' not in MinerConfig.model_fields:
+                raise ImportError("Missing hashrate_percent support")
             return pyasic
         except Exception:
             return None
